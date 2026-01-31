@@ -1,9 +1,9 @@
 # Requirements for Kore-onepipe
 # Pin versions where known from project context (Django 5.2.x used).
 
-Django==5.2.10
-djangorestframework==3.20.0
-djangorestframework-simplejwt==5.2.2
+Django
+djangorestframework
+djangorestframework-simplejwt
 python-dotenv==1.0.0
 requests==2.31.0
 cryptography==41.0.4
