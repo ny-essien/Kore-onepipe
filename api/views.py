@@ -21,6 +21,37 @@ from .models import Profile, ProfileVerificationAttempt, WebhookEvent
 from .onepipe_client import OnePipeClient, OnePipeError
 
 
+class HomeView(APIView):
+    """Welcome/homepage endpoint with API info"""
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        return Response({
+            "message": "Welcome to Kore OnePipe API",
+            "version": "1.0.0",
+            "description": "Bank account verification platform using OnePipe PayWithAccount",
+            "docs": {
+                "urls": "/docs/URLS_README.md",
+                "banks_endpoint": "/docs/BANKS_ENDPOINT.md",
+            },
+            "endpoints": {
+                "auth": {
+                    "signup": "POST /api/auth/signup/",
+                    "login": "POST /api/auth/login/",
+                    "me": "GET /api/auth/me/",
+                },
+                "profile": {
+                    "view": "GET /api/profile/me/",
+                    "update_personal": "PATCH /api/profile/personal/",
+                    "update_bank": "PATCH /api/profile/bank/",
+                    "submit": "POST /api/profile/submit/",
+                },
+                "banks": "GET /api/banks/",
+                "webhook": "POST /api/webhooks/onepipe/",
+            }
+        }, status=status.HTTP_200_OK)
+
+
 class SignupView(APIView):
     """Handle user registration and issue JWT tokens"""
     permission_classes = (AllowAny,)
