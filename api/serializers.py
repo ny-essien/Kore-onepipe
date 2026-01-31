@@ -15,7 +15,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(required=True, write_only=True)
+    full_name = serializers.CharField(required=True, write_only=True, label="Full name")
     email = serializers.EmailField(required=True)
     password = serializers.CharField(
         write_only=True, required=True, style={"input_type": "password"}
@@ -26,7 +26,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("name", "email", "password", "confirm_password")
+        fields = ("full_name", "email", "password", "confirm_password")
 
     def validate_email(self, value):
         """Validate that email is unique"""
@@ -55,7 +55,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User.objects.create_user(
             username=validated_data["email"],
             email=validated_data["email"],
-            first_name=validated_data["name"],
+            first_name=validated_data["full_name"],
             password=validated_data["password"],
         )
         return user

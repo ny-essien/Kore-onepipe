@@ -60,12 +60,8 @@ class SignupView(APIView):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Create Profile for the user
-            Profile.objects.create(
-                user=user,
-                first_name=user.first_name,
-                is_completed=False
-            )
+            # Profile is auto-created by signal when user is created
+            # No need to create it manually here
             
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)

@@ -2,11 +2,13 @@
 Simple API client for sign up and sign in against the local Django API.
 
 Usage:
-  python scripts/api_client.py signup --email user@example.com --name "User" --password secret
+  python scripts/api_client.py signup --email user@example.com --full-name "User" --password secret
   python scripts/api_client.py login --email user@example.com --password secret
 
 It reads BASE_URL from environment or defaults to http://localhost:8000/api/.
 Prints JSON responses to stdout.
+
+Note: Username is auto-generated from email and not required for signup.
 """
 import os
 import sys
@@ -17,10 +19,10 @@ import json
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000/api/")
 
 
-def signup(email, name, password):
+def signup(email, full_name, password):
     url = BASE_URL.rstrip("/") + "/auth/signup/"
     payload = {
-        "name": name,
+        "full_name": full_name,
         "email": email,
         "password": password,
         "confirm_password": password,
@@ -50,7 +52,7 @@ def main(argv):
 
     p_signup = sub.add_parser("signup")
     p_signup.add_argument("--email", required=True)
-    p_signup.add_argument("--name", required=True)
+    p_signup.add_argument("--full-name", required=True)
     p_signup.add_argument("--password", required=True)
 
     p_login = sub.add_parser("login")
@@ -59,7 +61,7 @@ def main(argv):
 
     args = parser.parse_args(argv)
     if args.cmd == "signup":
-        return signup(args.email, args.name, args.password)
+        return signup(args.email, args.full_name, args.password)
     if args.cmd == "login":
         return login(args.email, args.password)
 

@@ -33,7 +33,7 @@ def run():
 
     print('\n[STEP] Signing up')
     signup_resp = client.post('/api/auth/signup/', {
-        'name': name,
+        'full_name': name,
         'email': email,
         'password': password,
         'confirm_password': password,

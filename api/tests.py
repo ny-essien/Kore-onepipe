@@ -10,7 +10,7 @@ from .models import Profile, ProfileVerificationAttempt
 class AuthTests(APITestCase):
 	def test_signup_creates_user_profile_and_returns_tokens(self):
 		payload = {
-			"name": "John Doe",
+			"full_name": "John Doe",
 			"email": "john@example.com",
 			"password": "StrongPass123!",
 			"confirm_password": "StrongPass123!",
@@ -52,8 +52,8 @@ class AuthTests(APITestCase):
 		email = "alice@example.com"
 		password = "AlicePass1!"
 		user = User.objects.create_user(username=email, email=email, first_name="Alice", password=password)
-		# ensure profile exists (signup normally creates it, but create here)
-		Profile.objects.create(user=user, first_name=user.first_name, is_completed=False)
+		# Profile is auto-created by signal when user is created
+		profile = user.profile
 
 		refresh = RefreshToken.for_user(user)
 		access = str(refresh.access_token)
@@ -377,7 +377,8 @@ class ProfileSerializerTests(APITestCase):
 		email = "banker@example.com"
 		password = "SecurePass1!"
 		user = User.objects.create_user(username=email, email=email, password=password)
-		profile = Profile.objects.create(user=user, first_name="Banker")
+		# Profile is auto-created by signal when user is created
+		profile = user.profile
 		
 		data = {
 			"account_number": "1234567890",
@@ -408,7 +409,8 @@ class ProfileViewTests(APITestCase):
 		self.user = User.objects.create_user(
 			username=self.email, email=self.email, first_name="Test", password=self.password
 		)
-		self.profile = Profile.objects.create(user=self.user, first_name="Test")
+		# Profile is auto-created by signal when user is created
+		self.profile = self.user.profile
 		
 		# Authenticate
 		refresh = RefreshToken.for_user(self.user)
@@ -699,26 +701,25 @@ class ProfileSubmitViewTests(APITestCase):
 			password="testpass123"
 		)
 		
-		# Create profile with draft data
-		self.profile = Profile.objects.create(
-			user=self.user,
-			first_name="Test",
-			draft_payload={
-				"personal": {
-					"first_name": "John",
-					"surname": "Doe",
-					"phone_number": "2348022221412",
-					"date_of_birth": "1990-01-15",
-					"gender": "M",
-				},
-				"bank": {
-					"bank_name": "Access Bank",
-					"bank_code": "044",
-					"account_number_encrypted": "gAAAAABlz...",  # Mock encrypted
-					"bvn_encrypted": "gAAAAABlz...",  # Mock encrypted
-				}
+		# Profile is auto-created by signal, update it with draft data
+		self.profile = self.user.profile
+		self.profile.first_name = "Test"
+		self.profile.draft_payload = {
+			"personal": {
+				"first_name": "John",
+				"surname": "Doe",
+				"phone_number": "2348022221412",
+				"date_of_birth": "1990-01-15",
+				"gender": "M",
+			},
+			"bank": {
+				"bank_name": "Access Bank",
+				"bank_code": "044",
+				"account_number_encrypted": "gAAAAABlz...",  # Mock encrypted
+				"bvn_encrypted": "gAAAAABlz...",  # Mock encrypted
 			}
-		)
+		}
+		self.profile.save()
 		
 		# Get access token
 		refresh = RefreshToken.for_user(self.user)
