@@ -30,7 +30,21 @@ SECRET_KEY = 'django-insecure-seq(&_(tqk(8m__bxeh%=7&vnre9^b0kq#u98)uc6q^@!x)fa&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']  # In development; restrict for production
+ALLOWED_HOSTS = [
+
+    'koreapi.onrender.com',
+    '*',
+    
+    ]  # In development; restrict for production
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://koreapi.onrender.com",
+]
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
 
 
 # Application definition
