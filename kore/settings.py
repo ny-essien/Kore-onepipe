@@ -30,12 +30,12 @@ SECRET_KEY = 'django-insecure-seq(&_(tqk(8m__bxeh%=7&vnre9^b0kq#u98)uc6q^@!x)fa&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+#ALLOWED_HOSTS = ['*']  # In development; restrict for production
 ALLOWED_HOSTS = [
 
-    'koreapi.onrender.com',
-    '*',
-    
-    ]  # In development; restrict for production
+    "koreapi.onrender.com",
+    "*",
+]
 
 CSRF_TRUSTED_ORIGINS = [
     "https://koreapi.onrender.com",
@@ -45,6 +45,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
+
 
 
 # Application definition
@@ -159,7 +160,5 @@ ONEPIPE = {
     "WEBHOOK_URL": os.getenv("ONEPIPE_WEBHOOK_URL", ""),
     "BASE_URL": os.getenv("ONEPIPE_BASE_URL", "https://api.dev.onepipe.io"),
     "TRANSACT_PATH": os.getenv("ONEPIPE_TRANSACT_PATH", "/v2/transact"),
-    # Optional biller code used when building mandate payloads
-    "ONEPIPE_BILLER_CODE": os.getenv("ONEPIPE_BILLER_CODE", ""),
 }
 
