@@ -331,3 +331,70 @@ class Mandate(models.Model):
     
     def __str__(self):
         return f"Mandate({self.user.email}, {self.status}, {self.request_ref})"
+
+
+class Transaction(models.Model):
+    """Model for transaction records (debits/credits)"""
+    TRANSACTION_TYPE_CHOICES = [
+        ("debit", "Debit"),
+        ("credit", "Credit"),
+    ]
+    
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    ]
+    
+    BUCKET_CHOICES = [
+        ("savings", "Savings"),
+        ("investment", "Investment"),
+        ("emergency", "Emergency"),
+        ("custom", "Custom"),
+    ]
+    
+    # Relationships
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="transactions")
+    
+    # Transaction Details
+    reference = models.CharField(max_length=50, unique=True, db_index=True)
+    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    
+    # Bucket Information
+    bucket = models.CharField(max_length=20, choices=BUCKET_CHOICES, null=True, blank=True)
+    custom_bucket_name = models.CharField(max_length=255, blank=True)
+    
+    # Transaction Info
+    description = models.CharField(max_length=500, blank=True)
+    narration = models.CharField(max_length=500, blank=True)
+    
+    # Provider Reference (for external integrations)
+    request_ref = models.CharField(max_length=100, blank=True, db_index=True)
+    provider_reference = models.CharField(max_length=100, blank=True)
+    failure_reason = models.TextField(blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Transaction"
+        verbose_name_plural = "Transactions"
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["reference"]),
+        ]
+    
+    def __str__(self):
+        return f"Transaction({self.reference}, {self.amount}, {self.status})"
+    
+    @classmethod
+    def generate_reference(cls):
+        """Generate a unique transaction reference"""
+        import uuid
+        return f"TXN-{uuid.uuid4().hex[:12].upper()}"

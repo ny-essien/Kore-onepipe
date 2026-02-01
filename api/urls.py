@@ -37,10 +37,12 @@ urlpatterns = [
     path('profile/submit/', ProfileSubmitView.as_view(), name='profile_submit'),
     path('banks/', banks_list, name='banks'),
     path('webhooks/onepipe/', OnePipeWebhookView.as_view(), name='webhook_onepipe'),
+    # Rules Engine
     path('rules-engine/', RulesEngineCreateView.as_view(), name='rules_engine_create'),
     path('rules-engine/me/', RulesEngineDetailView.as_view(), name='rules_engine_detail'),
-        path('rules-engine/me/disable/', RulesEngineDisableView.as_view(), name='rules_engine_disable'),
-        path('mandates/create/', MandateCreateView.as_view(), name='mandate_create'),
-        path('mandates/me/', MandatesMeView.as_view(), name='mandates_me'),
-        path('mandates/cancel/', CancelMandateView.as_view(), name='mandate_cancel'),
+    path('rules-engine/me/disable/', RulesEngineDisableView.as_view(), name='rules_engine_disable'),
+    # Mandates
+    path('mandates/create/', MandateCreateView.as_view(), name='mandate_create'),
+    path('mandates/me/', MandatesMeView.as_view(), name='mandates_me'),
+    path('mandates/cancel/', CancelMandateView.as_view(), name='mandate_cancel'),
 ]

@@ -207,6 +207,7 @@ class RulesEngineSerializer(serializers.ModelSerializer):
         model = RulesEngine
         fields = (
             "id",
+            "user",
             "monthly_max_debit",
             "single_max_debit",
             "frequency",
@@ -219,7 +220,7 @@ class RulesEngineSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at", "is_active")
+        read_only_fields = ("id", "is_active", "created_at", "updated_at")
     
     def validate_monthly_max_debit(self, value):
         """Validate monthly_max_debit is positive"""
@@ -264,87 +265,32 @@ class RulesEngineSerializer(serializers.ModelSerializer):
         return value
     
     def validate_allocations(self, value):
-        """
-        Validate allocations structure:
-        - Must be a non-empty list
-        - Each item must have 'bucket' and 'percentage' keys
-        - Percentage must be between 1 and 100
-        - Total percentage must equal exactly 100
-        """
+        """Validate that allocations sum to 100%"""
         if not value:
-            raise serializers.ValidationError("allocations cannot be empty.")
+            raise serializers.ValidationError("At least one allocation is required.")
         
-        if not isinstance(value, list):
-            raise serializers.ValidationError("allocations must be a list.")
-        
-        total_percentage = 0
-        
-        for idx, allocation in enumerate(value):
-            if not isinstance(allocation, dict):
-                raise serializers.ValidationError(
-                    f"allocations[{idx}] must be an object/dictionary."
-                )
-            
-            # Check required keys
-            if "bucket" not in allocation:
-                raise serializers.ValidationError(
-                    f"allocations[{idx}] missing required key 'bucket'."
-                )
-            
-            if "percentage" not in allocation:
-                raise serializers.ValidationError(
-                    f"allocations[{idx}] missing required key 'percentage'."
-                )
-            
-            # Validate bucket is a string
-            if not isinstance(allocation["bucket"], str) or not allocation["bucket"]:
-                raise serializers.ValidationError(
-                    f"allocations[{idx}]['bucket'] must be a non-empty string."
-                )
-            
-            # Validate percentage is a number
-            try:
-                percentage = float(allocation["percentage"])
-            except (ValueError, TypeError):
-                raise serializers.ValidationError(
-                    f"allocations[{idx}]['percentage'] must be a number."
-                )
-            
-            # Validate percentage is between 1 and 100
-            if percentage < 1 or percentage > 100:
-                raise serializers.ValidationError(
-                    f"allocations[{idx}]['percentage'] must be between 1 and 100."
-                )
-            
-            total_percentage += percentage
-        
-        # Validate total percentage equals 100
-        if total_percentage != 100:
+        total = sum(alloc.get("percentage", 0) for alloc in value)
+        if total != 100:
             raise serializers.ValidationError(
-                f"Total percentage of allocations must equal 100, got {total_percentage}."
+                f"Allocations must sum to 100%. Currently: {total}%"
             )
-        
         return value
     
     def validate(self, data):
-        """Validate date relationships and other cross-field validations"""
-        start_date = data.get("start_date")
-        end_date = data.get("end_date")
+        """Cross-field validations"""
+        # Validate amount_per_frequency doesn't exceed single_max_debit
+        if data.get("amount_per_frequency") and data.get("single_max_debit"):
+            if data["amount_per_frequency"] > data["single_max_debit"]:
+                raise serializers.ValidationError({
+                    "amount_per_frequency": "Amount per frequency cannot exceed single max debit."
+                })
         
         # Validate end_date is after start_date if provided
-        if end_date and start_date and end_date <= start_date:
-            raise serializers.ValidationError({
-                "end_date": "end_date must be after start_date."
-            })
-        
-        # Validate single_max_debit is not greater than monthly_max_debit
-        monthly_max = data.get("monthly_max_debit")
-        single_max = data.get("single_max_debit")
-        
-        if monthly_max and single_max and single_max > monthly_max:
-            raise serializers.ValidationError({
-                "single_max_debit": "single_max_debit cannot be greater than monthly_max_debit."
-            })
+        if data.get("end_date") and data.get("start_date"):
+            if data["end_date"] <= data["start_date"]:
+                raise serializers.ValidationError({
+                    "end_date": "End date must be after start date."
+                })
         
         return data
     
@@ -592,3 +538,103 @@ class MandateSerializer(serializers.ModelSerializer):
                 return code
         
         return None
+
+
+# ===== TRANSACTION SERIALIZERS =====
+
+from .models import Transaction
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    """Serializer for creating transactions"""
+    
+    class Meta:
+        model = Transaction
+        fields = (
+            "id",
+            "transaction_type",
+            "amount",
+            "bucket",
+            "custom_bucket_name",
+            "description",
+            "narration",
+        )
+    
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than zero.")
+        return value
+    
+    def create(self, validated_data):
+        user = self.context["request"].user
+        reference = Transaction.generate_reference()
+        
+        return Transaction.objects.create(
+            user=user,
+            reference=reference,
+            **validated_data
+        )
+
+
+class TransactionReadSerializer(serializers.ModelSerializer):
+    """Read-only serializer for transaction details"""
+    bucket_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Transaction
+        fields = (
+            "id",
+            "reference",
+            "transaction_type",
+            "status",
+            "amount",
+            "bucket",
+            "bucket_display",
+            "custom_bucket_name",
+            "description",
+            "narration",
+            "request_ref",
+            "provider_reference",
+            "failure_reason",
+            "created_at",
+            "completed_at",
+        )
+    
+    def get_bucket_display(self, obj):
+        if obj.bucket == "CUSTOM" and obj.custom_bucket_name:
+            return obj.custom_bucket_name
+        return obj.get_bucket_display() if obj.bucket else None
+
+
+class TransactionListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for transaction lists"""
+    bucket_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Transaction
+        fields = (
+            "id",
+            "reference",
+            "transaction_type",
+            "status",
+            "amount",
+            "bucket",
+            "bucket_display",
+            "description",
+            "created_at",
+        )
+    
+    def get_bucket_display(self, obj):
+        if obj.bucket == "CUSTOM" and obj.custom_bucket_name:
+            return obj.custom_bucket_name
+        return obj.get_bucket_display() if obj.bucket else None
+
+
+class TransactionSummarySerializer(serializers.Serializer):
+    """Serializer for transaction summary/analytics"""
+    total_debited = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total_credited = serializers.DecimalField(max_digits=14, decimal_places=2)
+    transaction_count = serializers.IntegerField()
+    by_bucket = serializers.DictField()
+    by_status = serializers.DictField()
+
