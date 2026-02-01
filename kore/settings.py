@@ -17,10 +17,10 @@ import os
 # corsheaders defaults import used to compose allow lists below
 try:
     from corsheaders.defaults import default_headers, default_methods
-except Exception:
+except ImportError:
     # If django-cors-headers is not installed yet, defaults will be assigned later.
-    default_headers = []
-    default_methods = []
+    default_headers = None
+    default_methods = None
 
 # Load environment variables from .env file
 load_dotenv()
@@ -180,42 +180,54 @@ ONEPIPE = {
 
 
 # CORS configuration
-# By default allow all origins for development and testing. In production,
-# set the environment variable `CORS_ALLOW_ALL_ORIGINS` to "False" and
-# provide a comma-separated `CORS_ALLOWED_ORIGINS` value of allowed origins.
-CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() in ("1", "true", "yes")
+# By default allow all origins for development. In production,
+# set DEBUG=False and provide CORS_ALLOW_ALL_ORIGINS=False and
+# CORS_ALLOWED_ORIGINS as comma-separated values.
+
+# Determine CORS policy based on DEBUG setting and environment variable
+if DEBUG:
+    # Development: allow all origins by default unless explicitly restricted
+    CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() in ("1", "true", "yes")
+else:
+    # Production: restrict to specific origins by default
+    CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "False").lower() in ("1", "true", "yes")
+
 CORS_ALLOW_CREDENTIALS = True
 
-# Compose allowed headers/methods using corsheaders defaults when available
-CORS_ALLOW_HEADERS = list(default_headers) + ["Signature"] if default_headers else [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    "signature",
-]
+# Build allowed headers from corsheaders defaults if available, otherwise use a safe list
+if default_headers:
+    CORS_ALLOW_HEADERS = list(default_headers) + ["Signature"]
+else:
+    CORS_ALLOW_HEADERS = [
+        "accept",
+        "accept-encoding",
+        "authorization",
+        "content-type",
+        "dnt",
+        "origin",
+        "user-agent",
+        "x-csrftoken",
+        "x-requested-with",
+        "signature",
+    ]
 
-CORS_ALLOW_METHODS = list(default_methods) if default_methods else [
-    "DELETE",
-    "GET",
-    "OPTIONS",
-    "PATCH",
-    "POST",
-    "PUT",
-]
+# Build allowed methods from corsheaders defaults if available
+if default_methods:
+    CORS_ALLOW_METHODS = list(default_methods)
+else:
+    CORS_ALLOW_METHODS = [
+        "DELETE",
+        "GET",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT",
+    ]
 
-# If an explicit list of origins is provided via env var, use that in production
+# If explicit list of origins provided via env var, use that (production mode)
 # Example: export CORS_ALLOWED_ORIGINS="https://example.com,https://admin.example.com"
-env_allowed = os.getenv("CORS_ALLOWED_ORIGINS", "")
+env_allowed = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
 if env_allowed:
     CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGINS = [h.strip() for h in env_allowed.split(",") if h.strip()]
-
-# Ensure OPTIONS preflight requests are handled by CorsMiddleware
-# (CorsMiddleware is placed at the top of MIDDLEWARE above)
+    CORS_ALLOWED_ORIGINS = [origin.strip() for origin in env_allowed.split(",") if origin.strip()]
 
