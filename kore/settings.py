@@ -14,6 +14,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+# corsheaders defaults import used to compose allow lists below
+try:
+    from corsheaders.defaults import default_headers, default_methods
+except Exception:
+    # If django-cors-headers is not installed yet, defaults will be assigned later.
+    default_headers = []
+    default_methods = []
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -58,11 +66,17 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders',
     'api',
 ]
 
 
 MIDDLEWARE = [
+    # CORS middleware should be placed as high as possible,
+    # especially before any middleware that can generate responses
+    # (CommonMiddleware, CsrfViewMiddleware) so that CORS headers
+    # are added to responses and preflight requests are handled.
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -161,4 +175,45 @@ ONEPIPE = {
     "BASE_URL": os.getenv("ONEPIPE_BASE_URL", "https://api.dev.onepipe.io"),
     "TRANSACT_PATH": os.getenv("ONEPIPE_TRANSACT_PATH", "/v2/transact"),
 }
+
+
+# CORS configuration
+# By default allow all origins for development and testing. In production,
+# set the environment variable `CORS_ALLOW_ALL_ORIGINS` to "False" and
+# provide a comma-separated `CORS_ALLOWED_ORIGINS` value of allowed origins.
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() in ("1", "true", "yes")
+CORS_ALLOW_CREDENTIALS = True
+
+# Compose allowed headers/methods using corsheaders defaults when available
+CORS_ALLOW_HEADERS = list(default_headers) + ["Signature"] if default_headers else [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "signature",
+]
+
+CORS_ALLOW_METHODS = list(default_methods) if default_methods else [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+# If an explicit list of origins is provided via env var, use that in production
+# Example: export CORS_ALLOWED_ORIGINS="https://example.com,https://admin.example.com"
+env_allowed = os.getenv("CORS_ALLOWED_ORIGINS", "")
+if env_allowed:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [h.strip() for h in env_allowed.split(",") if h.strip()]
+
+# Ensure OPTIONS preflight requests are handled by CorsMiddleware
+# (CorsMiddleware is placed at the top of MIDDLEWARE above)
 
