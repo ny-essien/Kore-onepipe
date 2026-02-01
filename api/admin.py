@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin
-from .models import Profile
+from .models import Profile, RulesEngine
 from .admin_forms import CustomUserCreationForm, CustomUserChangeForm
 
 
@@ -113,3 +113,38 @@ class ProfileAdmin(admin.ModelAdmin):
         return obj.user.email
     get_user_email.short_description = "Email"
     get_user_email.admin_order_field = "user__email"
+
+
+@admin.register(RulesEngine)
+class RulesEngineAdmin(admin.ModelAdmin):
+    """Admin interface for managing user debit rules"""
+    list_display = (
+        "user",
+        "frequency",
+        "amount_per_frequency",
+        "is_active",
+        "start_date",
+        "end_date",
+    )
+
+    list_filter = (
+        "frequency",
+        "is_active",
+    )
+
+    search_fields = (
+        "user__email",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    fieldsets = (
+        ("User", {"fields": ("user",)}),
+        ("Limits", {"fields": ("monthly_max_debit", "single_max_debit", "frequency", "amount_per_frequency")} ),
+        ("Timeline", {"fields": ("start_date", "end_date", "is_active")} ),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+

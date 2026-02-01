@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 from .serializers import (
     RegisterSerializer,
@@ -16,9 +17,18 @@ from .serializers import (
     ProfileMeSerializer,
     PersonalInfoSerializer,
     BankInfoSerializer,
+    RulesEngineSerializer,
+    RulesEngineUpdateSerializer,
+    RulesEngineDisableSerializer,
+    MandateCreateSerializer,
+    CancelMandateSerializer,
+    MandateSerializer,
 )
-from .models import Profile, ProfileVerificationAttempt, WebhookEvent
-from .onepipe_client import OnePipeClient, OnePipeError
+from .models import Profile, ProfileVerificationAttempt, WebhookEvent, RulesEngine, Mandate
+from .onepipe_client import OnePipeClient, OnePipeError, build_create_mandate_payload, build_cancel_mandate_payload
+import uuid
+import json
+from .utils.onepipe_utils import extract_activation_url, extract_provider_transaction_ref, extract_payment_id
 
 
 class HomeView(APIView):
@@ -46,10 +56,39 @@ class HomeView(APIView):
                     "update_bank": "PATCH /api/profile/bank/",
                     "submit": "POST /api/profile/submit/",
                 },
+                "rules": {
+                    "create": "POST /api/rules-engine/",
+                },
                 "banks": "GET /api/banks/",
                 "webhook": "POST /api/webhooks/onepipe/",
             }
         }, status=status.HTTP_200_OK)
+
+
+class ServicesView(APIView):
+    """
+    List of supported financial services.
+    
+    Used by the frontend for rules engine and service selection during mandate setup.
+    Returns a static, ordered list of services with keys and human-readable labels.
+    """
+    permission_classes = (AllowAny,)
+
+    # Static list of supported financial services
+    SERVICES = [
+        {"key": "SAVINGS", "label": "Savings"},
+        {"key": "INVESTMENT", "label": "Investment"},
+        {"key": "TAX", "label": "Tax"},
+        {"key": "LOANS", "label": "Loans"},
+        {"key": "BILLS", "label": "Bills"},
+    ]
+
+    def get(self, request):
+        """GET /api/services/ - Return list of supported financial services"""
+        return Response(
+            {"services": self.SERVICES},
+            status=status.HTTP_200_OK,
+        )
 
 
 class SignupView(APIView):
@@ -651,3 +690,336 @@ class OnePipeWebhookView(APIView):
 
 # Provide a module-level callable name expected by routing
 banks_list = BanksView.as_view()
+
+
+class RulesEngineCreateView(APIView):
+    """
+    Create and manage debit rules for the authenticated user.
+    
+    POST /api/rules-engine/ - Create a new debit rule
+    
+    Accepts all rules engine inputs in one request and validates using RulesEngineSerializer.
+    
+    After successful creation:
+    - Returns success response with "ready_for_mandate": true flag
+    - Auto-deactivates any previous active rules for the user
+    
+    TODO: trigger create mandate after rules engine is saved
+    """
+    permission_classes = (IsAuthenticated,)
+    
+    def post(self, request):
+        """
+        Create a new RulesEngine for the authenticated user.
+        
+        Request body:
+        {
+            "monthly_max_debit": 50000.00,
+            "single_max_debit": 10000.00,
+            "frequency": "MONTHLY",
+            "amount_per_frequency": 50000.00,
+            "allocations": [
+                {"bucket": "SAVINGS", "percentage": 50},
+                {"bucket": "SPENDING", "percentage": 50}
+            ],
+            "failure_action": "NOTIFY",
+            "start_date": "2026-02-01",
+            "end_date": null
+        }
+        """
+        serializer = RulesEngineSerializer(
+            data=request.data,
+            context={"request": request}
+        )
+        
+        if serializer.is_valid():
+            # Save the new rule
+            rule = serializer.save()
+            
+            # TODO: trigger create mandate after rules engine is saved
+            
+            return Response(
+                {
+                    "message": "Rules saved successfully",
+                    "rule": RulesEngineSerializer(rule).data,
+                    "ready_for_mandate": True,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class RulesEngineDetailView(APIView):
+    """
+    Retrieve the currently active RulesEngine for the authenticated user.
+    
+    GET /api/rules-engine/me/ - Get active rule
+    
+    Returns the currently active debit rule for the user, or 404 if none exists.
+    """
+    permission_classes = (IsAuthenticated,)
+    
+    def get(self, request):
+        """
+        Retrieve the currently active RulesEngine for the authenticated user.
+        
+        Response (200 OK):
+        {
+            "id": 5,
+            "monthly_max_debit": "50000.00",
+            "single_max_debit": "10000.00",
+            "frequency": "MONTHLY",
+            "amount_per_frequency": "50000.00",
+            "allocations": [...],
+            "failure_action": "NOTIFY",
+            "start_date": "2026-02-01",
+            "end_date": null,
+            "is_active": true,
+            "created_at": "2026-01-31T12:30:00Z",
+            "updated_at": "2026-01-31T12:30:00Z"
+        }
+        
+        Response (404 Not Found):
+        {
+            "error": "No rules engine configured yet."
+        }
+        """
+        rule = RulesEngine.get_active_for_user(request.user)
+        if not rule:
+            return Response({"error": "No rules engine configured yet."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = RulesEngineSerializer(rule)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        """Partially update the currently active RulesEngine for the authenticated user.
+
+        PATCH /api/rules-engine/me/
+        - Finds the active rule for request.user
+        - Applies partial updates via RulesEngineUpdateSerializer
+        - Returns updated RulesEngine data
+        """
+        rule = RulesEngine.get_active_for_user(request.user)
+        if not rule:
+            return Response({"error": "No rules engine configured yet."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = RulesEngineUpdateSerializer(
+            instance=rule, data=request.data, partial=True, context={"request": request}
+        )
+
+        if serializer.is_valid():
+            updated = serializer.save()
+            return Response(RulesEngineSerializer(updated).data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RulesEngineDisableView(APIView):
+    """Disable (soft-delete) the currently active RulesEngine for the authenticated user."""
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        """POST /api/rules-engine/me/disable/ - mark active rule as inactive"""
+        rule = RulesEngine.get_active_for_user(request.user)
+        if not rule:
+            return Response({"error": "No rules engine configured yet."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = RulesEngineDisableSerializer(instance=rule, data={})
+        # No input fields required; validate/save pattern for consistency
+        serializer.is_valid(raise_exception=True)
+        disabled = serializer.update(rule, serializer.validated_data)
+
+        return Response(
+            {"message": "Rules engine disabled", "rule": RulesEngineSerializer(disabled).data},
+            status=status.HTTP_200_OK,
+        )
+
+
+class MandateCreateView(APIView):
+    """POST /api/mandates/create/ - create a mandate via OnePipe
+
+    Flow:
+    1. Validate prerequisites with MandateCreateSerializer
+    2. Build payload with build_create_mandate_payload
+    3. Call OnePipeClient.transact
+    4. Persist Mandate record and return 201 with request_ref and activation_url
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        serializer = MandateCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        profile = serializer.validated_data["profile"]
+        rules_engine = serializer.validated_data["rules_engine"]
+        customer_consent = serializer.validated_data.get("customer_consent")
+
+        # Build payload
+        payload = build_create_mandate_payload(user, profile, rules_engine, customer_consent)
+
+        client = OnePipeClient()
+
+        try:
+            result = client.transact(payload)
+            request_ref = result.get("request_ref")
+            response_data = result.get("response")
+
+            # Persist Mandate and extract provider identifiers
+            provider_resp = {}
+            try:
+                if isinstance(response_data, dict):
+                    provider_resp = response_data.get("data", {}).get("provider_response") or {}
+            except Exception:
+                provider_resp = {}
+
+            activation_url = ""
+            transaction_ref = ""
+            if isinstance(response_data, dict):
+                data = response_data.get("data") or response_data
+                if isinstance(data, dict):
+                    activation_url = data.get("activation_url") or data.get("authorization_url") or data.get("redirect_url") or data.get("url") or ""
+                    transaction_ref = data.get("transaction_ref") or data.get("tx_ref") or data.get("transactionId") or ""
+
+            # Extract fields from provider_response
+            mandate_reference = None
+            subscription_id = None
+            provider_status = None
+            if isinstance(provider_resp, dict):
+                mandate_reference = provider_resp.get("reference") or provider_resp.get("mandate_reference")
+                provider_status = provider_resp.get("status")
+                meta = provider_resp.get("meta") or {}
+                try:
+                    subscription_id = meta.get("subscription_id")
+                except Exception:
+                    subscription_id = None
+
+            # Decide status
+            save_status = "PENDING"
+            if provider_status == "ACTIVE":
+                save_status = "ACTIVE"
+            elif provider_status and provider_status.upper() in ("SUCCESSFUL", "SUCCESS", "OK"):
+                save_status = "PENDING"
+
+            with transaction.atomic():
+                mandate = Mandate.objects.create(
+                    user=user,
+                    rules_engine=rules_engine,
+                    status=save_status,
+                    request_ref=request_ref or uuid.uuid4().hex,
+                    transaction_ref=transaction_ref or "",
+                    activation_url=activation_url or "",
+                    payment_id=extract_payment_id(response_data) or "",
+                    mandate_reference=mandate_reference or "",
+                    subscription_id=subscription_id,
+                    provider_response=response_data,
+                )
+
+            # If provider indicated failure via top-level status, return 400
+            top_status = ""
+            if isinstance(response_data, dict):
+                top_status = str(response_data.get("status", "")).lower()
+
+            if top_status and top_status not in ("successful", "success", "ok"):
+                return Response(
+                    {
+                        "message": "Provider indicated failure",
+                        "provider_response": response_data,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response(
+                {
+                    "id": mandate.id,
+                    "status": mandate.status,
+                    "request_ref": mandate.request_ref,
+                    "activation_url": mandate.activation_url,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except OnePipeError as e:
+            # Persist failed mandate record
+            with transaction.atomic():
+                mandate = Mandate.objects.create(
+                    user=user,
+                    rules_engine=rules_engine,
+                    status="FAILED",
+                    request_ref=getattr(e, "request_ref", uuid.uuid4().hex),
+                    provider_response={"error": str(e), "status_code": getattr(e, "status_code", None)},
+                )
+
+            return Response(
+                {"message": "Failed to contact OnePipe", "details": str(e)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
+class MandatesMeView(APIView):
+    """GET /api/mandates/me/ - return latest mandate for the authenticated user"""
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        mandate = Mandate.objects.filter(user=request.user).order_by("-created_at").first()
+        if not mandate:
+            return Response({"error": "No mandate found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = MandateSerializer(mandate)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CancelMandateView(APIView):
+    """POST /api/mandates/cancel/ - cancel an active mandate via OnePipe"""
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        serializer = CancelMandateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        profile = serializer.validated_data["profile"]
+
+        # Find latest ACTIVE mandate
+        mandate = Mandate.objects.filter(user=user, status="ACTIVE").order_by("-created_at").first()
+        if not mandate:
+            return Response({"error": "No active mandate to cancel"}, status=status.HTTP_404_NOT_FOUND)
+
+        # mandate_reference must exist
+        if not getattr(mandate, "mandate_reference", ""):
+            return Response({"error": "Mandate mandate_reference missing; cannot cancel."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = build_cancel_mandate_payload(user, profile, mandate)
+
+        client = OnePipeClient()
+        try:
+            result = client.transact(payload)
+            response = result.get("response")
+
+            # Save cancel provider response for audit
+            mandate.cancel_response = response
+
+            # Success condition: status == "Successful" AND data.provider_response_code == "00"
+            success = False
+            if isinstance(response, dict):
+                if response.get("status") == "Successful" and response.get("data", {}).get("provider_response_code") == "00":
+                    success = True
+
+            if success:
+                mandate.status = "CANCELLED"
+                mandate.cancelled_at = timezone.now()
+                mandate.save()
+                return Response({"message": "Mandate cancelled", "mandate_status": "CANCELLED"}, status=status.HTTP_200_OK)
+            else:
+                # keep mandate ACTIVE, but store cancel_response for audit
+                mandate.save()
+                return Response({"message": "Provider cancellation failed", "provider_response": response}, status=status.HTTP_400_BAD_REQUEST)
+
+        except OnePipeError as e:
+            mandate.cancel_response = {"error": str(e), "status_code": getattr(e, "status_code", None)}
+            mandate.save()
+            return Response({"message": "Failed to contact OnePipe", "details": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
+

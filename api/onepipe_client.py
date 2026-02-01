@@ -7,6 +7,9 @@ import uuid
 import hashlib
 import requests
 from django.conf import settings
+from decimal import Decimal
+from .triple_des import make_signature, triple_des_encrypt
+from .encryption import decrypt_value
 
 
 def build_get_banks_payload():
@@ -123,6 +126,125 @@ def build_lookup_accounts_min_payload(
     return payload
 
 
+def build_create_mandate_payload(user, profile, rules_engine, customer_consent_b64=None, request_ref=None):
+    """
+    Build payload for OnePipe `create mandate` request.
+
+    Decrypts `account_number_encrypted` and `bvn_encrypted` from `profile` in-memory,
+    uses TripleDES encryption to populate `auth.secure` and `meta.bvn`, and
+    constructs the `transaction` payload according to OnePipe requirements.
+    """
+    # Read config
+    cfg = settings.ONEPIPE
+    client_secret = cfg.get("CLIENT_SECRET")
+    biller_code = cfg.get("BILLER_CODE") or cfg.get("ONEPIPE_BILLER_CODE")
+
+    if not client_secret:
+        raise ValueError("ONEPIPE CLIENT_SECRET missing in settings.ONEPIPE")
+
+    # Decrypt stored encrypted values (in-memory only)
+    account_number = decrypt_value(getattr(profile, "account_number_encrypted", ""))
+    bvn_plain = decrypt_value(getattr(profile, "bvn_encrypted", ""))
+
+    # Bank code from profile
+    cbn_bankcode = getattr(profile, "bank_code", "")
+
+    # Build auth.secure (TripleDES encrypt of "account;bankcode")
+    auth_secure = ""
+    if account_number and cbn_bankcode:
+        auth_plain = f"{account_number};{cbn_bankcode}"
+        auth_secure = triple_des_encrypt(auth_plain, client_secret)
+
+    # Build meta.bvn (TripleDES encrypt of BVN)
+    meta_bvn = ""
+    if bvn_plain:
+        meta_bvn = triple_des_encrypt(bvn_plain, client_secret)
+
+    # mobile / customer_ref
+    mobile_no = getattr(profile, "phone_number", "")
+
+    # amount: monthly_max_debit * 1000, keep as string
+    monthly = getattr(rules_engine, "monthly_max_debit", None)
+    if monthly is None:
+        raise ValueError("rules_engine.monthly_max_debit is required")
+    amount_val = str(int((Decimal(monthly) * Decimal(1000)).to_integral_value()))
+
+    payload = {"request_type": "create mandate"}
+    if request_ref:
+        payload["request_ref"] = request_ref
+
+    payload["auth"] = {
+        "type": "bank.account",
+        "secure": auth_secure,
+        "auth_provider": "PaywithAccount",
+    }
+
+    payload["transaction"] = {
+        "mock_mode": "inspect",
+        "transaction_desc": "Creating a mandate",
+        "amount": 0,
+        "customer": {
+            "customer_ref": mobile_no,
+            "firstname": getattr(profile, "first_name", ""),
+            "surname": getattr(profile, "surname", ""),
+            "email": getattr(user, "email", ""),
+            "mobile_no": mobile_no,
+        },
+        "meta": {
+            "amount": amount_val,
+            "skip_consent": False,
+            "bvn": meta_bvn,
+            "biller_code": biller_code or "",
+            "customer_consent": customer_consent_b64 or "",
+        },
+        "details": {},
+    }
+
+    return payload
+
+
+def build_cancel_mandate_payload(user, profile, mandate, request_ref=None):
+    """Build payload for OnePipe 'Cancel Mandate' request."""
+    from decimal import Decimal
+    cfg = settings.ONEPIPE
+    biller_code = cfg.get("ONEPIPE_BILLER_CODE") or cfg.get("BILLER_CODE") or ""
+
+    # Validate phone
+    mobile_no = getattr(profile, "phone_number", "")
+    if not mobile_no or not mobile_no.startswith("234") or len(mobile_no) != 13:
+        raise ValueError("profile.phone_number must be 13 digits starting with '234'")
+
+    req_ref = request_ref or uuid.uuid4().hex
+
+    # Use mandate.mandate_reference as payment_id in meta
+    payload = {
+        "request_ref": req_ref,
+        "request_type": "Cancel Mandate",
+        "auth": {"type": None, "secure": None, "auth_provider": "PaywithAccount"},
+        "transaction": {
+            "mock_mode": "Inspect",
+            "transaction_ref": uuid.uuid4().hex,
+            "transaction_desc": "Cancel Mandate",
+            "transaction_ref_parent": None,
+            "amount": 0,
+            "customer": {
+                "customer_ref": mobile_no,
+                "firstname": getattr(profile, "first_name", ""),
+                "surname": getattr(profile, "surname", ""),
+                "email": getattr(user, "email", ""),
+                "mobile_no": mobile_no,
+            },
+            "meta": {
+                "payment_id": getattr(mandate, "mandate_reference", "") or getattr(mandate, "payment_id", ""),
+                "biller_code": biller_code or "",
+            },
+            "details": {},
+        },
+    }
+
+    return payload
+
+
 class OnePipeError(Exception):
     """Raised when OnePipe API returns non-2xx response"""
     def __init__(self, status_code, body, message=None):
@@ -143,7 +265,7 @@ class OnePipeClient:
         self.client_secret = self.config.get("CLIENT_SECRET")
 
         if not self.api_key or not self.client_secret:
-            raise ValueError("ONEPIPE_API_KEY and ONEPIPE_CLIENT_SECRET must be configured")
+            raise ValueError("ONEPIPE configuration missing: API_KEY and CLIENT_SECRET required in settings.ONEPIPE")
 
     def _generate_request_ref(self):
         """Generate a unique request reference using UUID4"""
@@ -154,8 +276,8 @@ class OnePipeClient:
         Generate MD5 signature from request_ref and client_secret.
         Format: MD5(request_ref;client_secret)
         """
-        signature_input = f"{request_ref};{self.client_secret}"
-        return hashlib.md5(signature_input.encode()).hexdigest()
+        # Use shared helper to ensure consistent UTF-8 encoding and lowercase
+        return make_signature(request_ref, self.client_secret)
 
     def _build_headers(self, request_ref):
         """Build request headers with auth and signature"""

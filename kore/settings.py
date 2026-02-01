@@ -145,5 +145,7 @@ ONEPIPE = {
     "WEBHOOK_URL": os.getenv("ONEPIPE_WEBHOOK_URL", ""),
     "BASE_URL": os.getenv("ONEPIPE_BASE_URL", "https://api.dev.onepipe.io"),
     "TRANSACT_PATH": os.getenv("ONEPIPE_TRANSACT_PATH", "/v2/transact"),
+    # Optional biller code used when building mandate payloads
+    "ONEPIPE_BILLER_CODE": os.getenv("ONEPIPE_BILLER_CODE", ""),
 }
 
