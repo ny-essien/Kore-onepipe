@@ -239,3 +239,11 @@ if env_allowed:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = [origin.strip() for origin in env_allowed.split(",") if origin.strip()]
 
+# Production security: Require HTTPS for CORS in production
+if not DEBUG:
+    CORS_ALLOW_CREDENTIALS = True
+    # Additional security headers (add to MIDDLEWARE if needed)
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() in ("1", "true", "yes")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "").strip().split(",") if os.getenv("CSRF_TRUSTED_ORIGINS") else []

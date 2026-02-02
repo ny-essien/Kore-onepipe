@@ -269,6 +269,20 @@ class BanksView(APIView):
     permission_classes = (AllowAny,)
     CACHE_KEY = "onepipe:get_banks"
     CACHE_TIMEOUT = 3600  # 1 hour
+    
+    # Fallback list of major Nigerian banks for when provider fails
+    FALLBACK_BANKS = [
+        {"name": "Access Bank", "code": "044"},
+        {"name": "GTBank", "code": "007"},
+        {"name": "Zenith Bank", "code": "057"},
+        {"name": "FirstBank", "code": "011"},
+        {"name": "UBA", "code": "033"},
+        {"name": "Guaranty Trust Bank", "code": "058"},
+        {"name": "FCMB", "code": "214"},
+        {"name": "Stanbic IBTC Bank", "code": "221"},
+        {"name": "Union Bank", "code": "032"},
+        {"name": "Sterling Bank", "code": "232"},
+    ]
 
     def get(self, request):
         # Check cache first
@@ -282,7 +296,6 @@ class BanksView(APIView):
             from .onepipe_client import build_get_banks_payload
 
             payload = build_get_banks_payload()
-
             result = client.transact(payload)
             response_data = result.get("response", {})
 
@@ -290,45 +303,23 @@ class BanksView(APIView):
             banks = self._parse_banks_from_response_v2(response_data)
 
             if banks is None:
-                # Provider response did not include banks
-                # If we have a cached value, return it as stale
-                cached = cache.get(self.CACHE_KEY)
-                if cached is not None:
-                    return Response({"banks": cached, "stale": True}, status=status.HTTP_200_OK)
-
-                redacted = {"provider_response": response_data}
-                return Response(
-                    {
-                        "error": "Unable to fetch banks from provider",
-                        "provider_response": redacted,
-                    },
-                    status=status.HTTP_502_BAD_GATEWAY,
-                )
+                # Provider failed, use fallback
+                cache.set(self.CACHE_KEY, self.FALLBACK_BANKS, self.CACHE_TIMEOUT)
+                return Response(self.FALLBACK_BANKS, status=status.HTTP_200_OK)
 
             # Cache and return
             cache.set(self.CACHE_KEY, banks, self.CACHE_TIMEOUT)
             return Response(banks, status=status.HTTP_200_OK)
 
         except OnePipeError as e:
-            # On provider error, if we have cached banks return them as stale
-            cached = cache.get(self.CACHE_KEY)
-            if cached is not None:
-                return Response({"banks": cached, "stale": True}, status=status.HTTP_200_OK)
+            # On provider error, use fallback
+            cache.set(self.CACHE_KEY, self.FALLBACK_BANKS, self.CACHE_TIMEOUT)
+            return Response(self.FALLBACK_BANKS, status=status.HTTP_200_OK)
 
-            return Response(
-                {"error": "Failed to fetch banks from OnePipe", "details": str(e)},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
         except Exception as e:
-            # On unexpected error, if cache exists return stale cache
-            cached = cache.get(self.CACHE_KEY)
-            if cached is not None:
-                return Response({"banks": cached, "stale": True}, status=status.HTTP_200_OK)
-
-            return Response(
-                {"error": "Unexpected error fetching banks", "details": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            # On unexpected error, use fallback
+            cache.set(self.CACHE_KEY, self.FALLBACK_BANKS, self.CACHE_TIMEOUT)
+            return Response(self.FALLBACK_BANKS, status=status.HTTP_200_OK)
 
     def _parse_banks_from_response(self, response_data):
         """
