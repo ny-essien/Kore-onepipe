@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from dotenv import load_dotenv
 import os
-
+import dj_database_url
 # corsheaders defaults import used to compose allow lists below
 try:
     from corsheaders.defaults import default_headers, default_methods
@@ -109,33 +109,20 @@ WSGI_APPLICATION = 'kore.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Use DATABASE_URL if provided (production), otherwise use SQLite (development)
-if os.getenv("DATABASE_URL"):
-    try:
-        import dj_database_url
-        DATABASES = {
-            "default": dj_database_url.config(
-                default=os.getenv("DATABASE_URL"),
-                conn_max_age=600,
-                ssl_require=True,
-            )
-        }
-    except ImportError:
-        # If dj_database_url is not installed, fall back to SQLite
-        DATABASES = {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
-else:
-    # Development: use SQLite by default
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
+'''DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
+}'''
+
+DATABASES = {
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+        ssl_require=True,
+    )
+}
 
 
 # Password validation
