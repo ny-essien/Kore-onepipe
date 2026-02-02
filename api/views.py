@@ -425,20 +425,20 @@ class ProfileSubmitView(APIView):
 
         # Build OnePipe payload for bank account lookup using builder function
         from .onepipe_client import build_lookup_accounts_min_payload
+        from .encryption import decrypt_value
         
         client = OnePipeClient()
         
-        # Get account number from draft (stored as plaintext in test draft_payload,
-        # but normally would be encrypted. For OnePipe lookup, we need plaintext.)
-        # In production, if account is encrypted in draft, it should be decrypted before passing to builder
-        account_number = draft_bank.get("account_number", "")  # Plaintext key in draft
+        # Decrypt sensitive fields from draft (they are stored encrypted)
+        account_number = decrypt_value(draft_bank.get("account_number_encrypted", ""))
+        bvn = decrypt_value(draft_bank.get("bvn_encrypted", ""))
         
         # Build payload using proper builder with Triple DES encryption
         payload = build_lookup_accounts_min_payload(
             customer_ref=f"user-{user.id}",
             account_number=account_number,
             bank_code=draft_bank.get("bank_code", ""),
-            bvn=draft_bank.get("bvn"),  # Plaintext BVN from draft
+            bvn=bvn,
             first_name=draft_personal.get("first_name", ""),
             last_name=draft_personal.get("surname", ""),
             mobile_no=draft_personal.get("phone_number", ""),

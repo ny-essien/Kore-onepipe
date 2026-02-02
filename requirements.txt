@@ -10,6 +10,7 @@ cryptography==41.0.4
 pycryptodome==3.18.0
 django-cors-headers
 psycopg
+psycopg2-binary
 dj-database-url
 
 # Dev / testing
