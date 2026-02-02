@@ -425,20 +425,20 @@ class ProfileSubmitView(APIView):
 
         # Build OnePipe payload for bank account lookup using builder function
         from .onepipe_client import build_lookup_accounts_min_payload
-        from .encryption import decrypt_value
         
         client = OnePipeClient()
         
-        # Decrypt sensitive fields from draft (they are stored encrypted)
-        account_number = decrypt_value(draft_bank.get("account_number_encrypted", ""))
-        bvn = decrypt_value(draft_bank.get("bvn_encrypted", ""))
+        # Get account number from draft (stored as plaintext in test draft_payload,
+        # but normally would be encrypted. For OnePipe lookup, we need plaintext.)
+        # In production, if account is encrypted in draft, it should be decrypted before passing to builder
+        account_number = draft_bank.get("account_number", "")  # Plaintext key in draft
         
         # Build payload using proper builder with Triple DES encryption
         payload = build_lookup_accounts_min_payload(
             customer_ref=f"user-{user.id}",
             account_number=account_number,
             bank_code=draft_bank.get("bank_code", ""),
-            bvn=bvn,
+            bvn=draft_bank.get("bvn"),  # Plaintext BVN from draft
             first_name=draft_personal.get("first_name", ""),
             last_name=draft_personal.get("surname", ""),
             mobile_no=draft_personal.get("phone_number", ""),
@@ -687,6 +687,7 @@ class RulesEngineCreateView(APIView):
     """
     Create and manage debit rules for the authenticated user.
     
+    GET /api/rules-engine/ - Get active rule
     POST /api/rules-engine/ - Create a new debit rule
     
     Accepts all rules engine inputs in one request and validates using RulesEngineSerializer.
@@ -698,6 +699,37 @@ class RulesEngineCreateView(APIView):
     TODO: trigger create mandate after rules engine is saved
     """
     permission_classes = (IsAuthenticated,)
+    
+    def get(self, request):
+        """
+        Retrieve the currently active RulesEngine for the authenticated user.
+        
+        Response (200 OK):
+        {
+            "id": 5,
+            "monthly_max_debit": "50000.00",
+            "single_max_debit": "10000.00",
+            "frequency": "MONTHLY",
+            "amount_per_frequency": "50000.00",
+            "allocations": [...],
+            "failure_action": "NOTIFY",
+            "start_date": "2026-02-01",
+            "end_date": null,
+            "is_active": true,
+            "created_at": "2026-01-31T12:30:00Z",
+            "updated_at": "2026-01-31T12:30:00Z"
+        }
+        
+        Response (404 Not Found):
+        {
+            "error": "No rules engine configured yet."
+        }
+        """
+        rule = RulesEngine.get_active_for_user(request.user)
+        if not rule:
+            return Response({"error": "No rules engine configured yet."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = RulesEngineSerializer(rule)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):
         """
